@@ -623,8 +623,7 @@
     !temp vars used when parsing lines in file [private variables]
     integer(IK) :: char_count = 0    !character position in the current line
     integer(IK) :: line_count = 1    !lines read counter
-    integer(IK) :: pushed_index = 0
-    character(kind=CK,len=10) :: pushed_char = ''  !JW : what is this magic number 10??
+    integer(IK) :: ipos       = 1    !next character to read
 
     contains
 !*****************************************************************************************
@@ -1356,10 +1355,9 @@
     end if
 
     !Just in case, clear these global variables also:
-    pushed_index = 0
-    pushed_char  = ''
-    char_count   = 0
-    line_count   = 1
+    char_count = 0
+    line_count = 1
+    ipos       = 1
 
     end subroutine json_initialize
 !*****************************************************************************************
@@ -4116,11 +4114,10 @@
     integer(IK),intent(in),optional              :: unit  !file unit number (/= 0)
     character(kind=CK,len=*),intent(in),optional :: str   !string with JSON data
 
-    integer(IK) :: iunit, istat, i, i_nl_prev, i_nl
+    integer(IK) :: iunit, istat, i, i_nl_prev, i_nl, istart, iend
     character(kind=CK,len=:),allocatable :: line, arrow_str
     character(kind=CK,len=10) :: line_str, char_str
     logical(LK) :: is_open
-    character(len=:),allocatable :: buffer
 
     !clear any exceptions and initialize:
     call json_initialize()
@@ -4136,6 +4133,7 @@
 
         !check to see if the file is already open
         ! if it is, then use it, otherwise open the file with the name given.
+        !   [NOTE: the file must be opened using UNFORMATTED and STREAM...  can this be checked?
         inquire(unit=iunit, opened=is_open, iostat=istat)
         if (istat==0 .and. .not. is_open) then
            ! open the file
@@ -4143,8 +4141,8 @@
                     file        = file, &
                     status      = 'OLD', &
                     action      = 'READ', &
-                    form        = 'FORMATTED', &
-                    position    = 'REWIND', &
+                    access      = 'STREAM', &      !
+                    form        = 'UNFORMATTED', & !
                     iostat      = istat)
         end if
 
@@ -4155,14 +4153,13 @@
                 file        = file, &
                 status      = 'OLD', &
                 action      = 'READ', &
-                form        = 'FORMATTED', &
-                position    = 'REWIND', &
+                access      = 'STREAM', &      !
+                form        = 'UNFORMATTED', & !
                 iostat      = istat)
 
     else if (.not. present(unit) .and. .not. present(file) .and. present(str)) then
 
-        buffer = str
-        iunit = 0    !indicates that json data will be read from buffer
+        iunit = 0    !indicates that json data will be read from str
         istat = 0
 
     else
@@ -4184,10 +4181,7 @@
         end if
 
         ! parse as a value
-        call parse_value(unit=iunit, str=buffer, value=p)
-
-        ! cleanup:
-        if (allocated(buffer)) deallocate(buffer)
+        call parse_value(unit=iunit, str=str, value=p)
 
         !
         !  If there was an error reading the file, then
@@ -4208,19 +4202,29 @@
 
             else
 
-                !get the current line from the string:
-                ! [this is done by counting the newline characters]
-                i_nl_prev = 0  !index of previous newline character
-                do i=1,line_count
-                    i_nl = index(str(i_nl_prev+1:),newline)
-                    if (i_nl==0) then   !last line - no newline character
-                        i_nl = len(str)+1
-                        exit
-                    end if
-                    i_nl = i_nl + i_nl_prev   !index of current newline character
-                    i_nl_prev = i_nl          !update for next iteration
-                end do
-                line = str(i_nl_prev+1 : i_nl-1)  !extract current line
+!..... original:
+
+        !      !get the current line from the string:
+        !      ! [this is done by counting the newline characters]
+        !      i_nl_prev = 0  !index of previous newline character
+        !      do i=1,line_count
+        !          i_nl = index(str(i_nl_prev+1:),newline)
+        !          if (i_nl==0) then   !last line - no newline character
+        !              i_nl = len(str)+1
+        !              exit
+        !          end if
+        !          i_nl = i_nl + i_nl_prev   !index of current newline character
+        !          i_nl_prev = i_nl          !update for next iteration
+        !      end do
+        !      line = str(i_nl_prev+1 : i_nl-1)  !extract current line
+
+!
+!....should be able to do something along these lines....  DOUBLE CHECK THIS....
+!    using the ipos counter
+
+               istart = max(1,index(str(1:ipos),newline,back=.true.))
+               iend   = max(len(str),ipos+index(str(ipos:),newline)-1)
+               line = str(istart:iend)
 
             end if
 
@@ -4269,31 +4273,64 @@
     integer(IK),intent(in)                           :: iunit
     character(kind=CK,len=:),allocatable,intent(out) :: line
 
-    integer(IK),parameter              :: n_chunk = 256   ! chunk size [arbitrary]
-    character(kind=CK,len=*),parameter :: nfmt = '(A256)' ! corresponding format statement
+!
+! ... original:
+!
 
-    character(kind=CK,len=n_chunk) :: chunk
-    integer(IK) :: istat,isize
+!    integer(IK),parameter              :: n_chunk = 256   ! chunk size [arbitrary]
+!    character(kind=CK,len=*),parameter :: nfmt = '(A256)' ! corresponding format statement
+!
+!    character(kind=CK,len=n_chunk) :: chunk
+!    integer(IK) :: istat,isize
+!
+!    !initialize:
+!    line = ''
+!
+!    !rewind to beginning of the current record:
+!    backspace(iunit, iostat=istat)
+!
+!    !loop to read in all the characters in the current record.
+!    ![the line is read in chunks until the end of the line is reached]
+!    if (istat==0) then
+!        do
+!            read(iunit,fmt=nfmt,advance='NO',size=isize,iostat=istat) chunk
+!            if (istat==0) then
+!                line = line//chunk
+!            else
+!                if (isize>0) line = line//chunk(1:isize)
+!                exit
+!            end if
+!        end do
+!    end if
 
-    !initialize:
-    line = ''
+!
+!....update for the new STREAM version.....       
+!   !!! !!!! not quite right for EXAMPLE 6 case 2 .....  DOUBLE CHECK THIS...
 
-    !rewind to beginning of the current record:
-    backspace(iunit, iostat=istat)
+    integer(IK) :: istart,iend,ios
+    character(kind=CK,len=1) :: c
 
-    !loop to read in all the characters in the current record.
-    ![the line is read in chunks until the end of the line is reached]
-    if (istat==0) then
-        do
-            read(iunit,fmt=nfmt,advance='NO',size=isize,iostat=istat) chunk
-            if (istat==0) then
-                line = line//chunk
-            else
-                if (isize>0) line = line//chunk(1:isize)
-                exit
-            end if
-        end do
-    end if
+    istart = ipos
+    do 
+        if (istart<=1) then
+            istart = 1
+            exit
+        end if
+        read(iunit,pos=istart,iostat=ios) c
+        if (c==newline .or. ios/=0) then
+            if (istart/=1) istart = istart - 1
+            exit
+        end if
+        istart = istart-1  !rewind until the beginning of the line
+    end do
+    iend = ipos
+    do
+        read(iunit,pos=iend,iostat=ios) c
+        if (c==newline .or. ios/=0) exit
+        iend=iend+1
+    end do
+    allocate( character(len=iend-istart+1) :: line )
+    read(iunit,pos=istart,iostat=ios) line   
 
     end subroutine get_current_line_from_file
 !*****************************************************************************************
@@ -4313,9 +4350,9 @@
 
     implicit none
 
-    integer(IK),intent(in)                             :: unit
-    character(kind=CK,len=:),allocatable,intent(inout) :: str  !only used if unit=0
-    type(json_value),pointer                           :: value
+    integer(IK),intent(in)                 :: unit
+    character(kind=CK,len=*),intent(in)    :: str  !only used if unit=0
+    type(json_value),pointer               :: value
 
     logical(LK) :: eof
     character(kind=CK,len=1) :: c
@@ -4351,7 +4388,7 @@
             case (end_array)
 
                 ! end an empty array
-                call push_char(c)
+                call push_char()
                 nullify(value)
 
             case (quotation_mark)
@@ -4388,7 +4425,7 @@
 
             case('-', '0': '9')
 
-                call push_char(c)
+                call push_char()
                 call parse_number(unit, str, value)
 
             case default
@@ -4906,9 +4943,9 @@
 
     implicit none
 
-    integer(IK), intent(in)  :: unit
-    character(kind=CK,len=:),allocatable,intent(inout) :: str
-    type(json_value),pointer :: parent
+    integer(IK),intent(in)              :: unit
+    character(kind=CK,len=*),intent(in) :: str
+    type(json_value),pointer            :: parent
 
     type(json_value),pointer :: pair
     logical(LK) :: eof
@@ -5007,7 +5044,7 @@
     implicit none
 
     integer(IK), intent(in)  :: unit
-    character(kind=CK,len=:),allocatable,intent(inout) :: str
+    character(kind=CK,len=*),intent(in) :: str
     type(json_value),pointer :: array
 
     type(json_value),pointer :: element
@@ -5074,7 +5111,7 @@
     implicit none
 
     integer(IK), intent(in)                            :: unit
-    character(kind=CK,len=:),allocatable,intent(inout) :: str
+    character(kind=CK,len=*),intent(in)                :: str
     character(kind=CK,len=:),allocatable,intent(out)   :: string
 
     logical(LK) :: eof, is_hex, escape
@@ -5171,9 +5208,9 @@
 
     implicit none
 
-    integer(IK), intent(in)                            :: unit
-    character(kind=CK,len=:),allocatable,intent(inout) :: str
-    character(kind=CK,len = *), intent(in)             :: chars
+    integer(IK), intent(in)                :: unit
+    character(kind=CK,len=*),intent(in)    :: str
+    character(kind=CK,len = *), intent(in) :: chars
 
     integer(IK) :: i, length
     logical(LK) :: eof
@@ -5223,9 +5260,9 @@
 
     implicit none
 
-    integer(IK),intent(in)                             :: unit
-    character(kind=CK,len=:),allocatable,intent(inout) :: str
-    type(json_value),pointer                           :: value
+    integer(IK),intent(in)              :: unit
+    character(kind=CK,len=*),intent(in) :: str
+    type(json_value),pointer            :: value
 
     character(kind=CK,len=:),allocatable :: tmp
     character(kind=CK,len=1) :: c
@@ -5276,7 +5313,7 @@
                 case default
 
                     !push back the last character read:
-                    call push_char(c)
+                    call push_char()
 
                     !string to value:
                     if (is_integer) then
@@ -5326,17 +5363,15 @@
 
     implicit none
 
-    character(kind=CK,len=1)                           :: popped
-    integer(IK),intent(in)                             :: unit
-    character(kind=CK,len=:),allocatable,intent(inout) :: str  !only used if unit=0
-    logical(LK),intent(out)                            :: eof
-    logical(LK),intent(in),optional                    :: skip_ws
+    character(kind=CK,len=1)            :: popped
+    integer(IK),intent(in)              :: unit
+    character(kind=CK,len=*),intent(in) :: str  !only used if unit=0
+    logical(LK),intent(out)             :: eof
+    logical(LK),intent(in),optional     :: skip_ws
 
-    integer(IK) :: ios
+    integer(IK) :: ios,str_len
     character(kind=CK,len=1) :: c
     logical(LK) :: ignore
-    integer(IK) :: str_len
-    character(kind=CK,len=:),allocatable :: tmp  !workaround for bug in gfortran 4.9.2 compiler
 
     if (.not. exception_thrown) then
 
@@ -5349,49 +5384,38 @@
 
         do
 
-            if (pushed_index > 0) then
+            if (unit/=0) then    !read from the file
 
-                ! there is a character pushed back on, most likely from the number parsing
-                c = pushed_char(pushed_index:pushed_index)
-                pushed_index = pushed_index - 1
+                !read the next character:
+                read(unit=unit,pos=ipos,iostat=ios) c
+                ipos = ipos + 1
 
-            else
+            else    !read from the string
 
-                if (unit/=0) then    !read from the file
-                    read (unit = unit, fmt = '(A1)', advance = 'NO', iostat = ios) c
-                else    !read from the string
-                    tmp = str   !!! copy to a temp variable to workaround a bug in gfortran 4.9.2
-                    str_len = len(tmp)   !length of the string
-                    if (str_len>0) then
-                        c = tmp(1:1)
-                        if (str_len>1) then
-                            tmp = tmp(2:str_len)  !remove the character that was read
-                        else
-                            tmp = ''    !that was the last one
-                        end if
-                        str = tmp
-                        deallocate(tmp)   !!!
-                        ios = 0
-                    else
-                        ios = IOSTAT_END  !end of the string
-                    end if
+                str_len = len(str)   !length of the string
+                if (ipos<=str_len) then
+                    c = str(ipos:ipos)
+                    ios = 0
+                else
+                    ios = IOSTAT_END  !end of the string
                 end if
+                ipos = ipos + 1
 
-                char_count = char_count + 1    !character count in the current line
+            end if
 
-                if (IS_IOSTAT_EOR(ios) .or. c==newline) then    !end of record
+            char_count = char_count + 1    !character count in the current line
 
-                    char_count = 0
-                    line_count = line_count + 1
-                    cycle
+            if (IS_IOSTAT_END(ios)) then  !end of file
 
-                else if (IS_IOSTAT_END(ios)) then  !end of file
+                char_count = 0
+                eof = .true.
+                exit
 
-                    char_count = 0
-                    eof = .true.
-                    exit
+            elseif (IS_IOSTAT_EOR(ios) .or. c==newline) then    !end of record
 
-                end if
+                char_count = 0
+                line_count = line_count + 1
+                cycle
 
             end if
 
@@ -5426,34 +5450,23 @@
 !    push_char
 !
 !  DESCRIPTION
-!    Core routine.
+!    Backspace by one character in file or string being parsed.
 !
 !  SEE ALSO
 !    pop_char
 !
+!  HISTORY
+!    Jacob Williams : 3/4/2015 : replaced original version of this routine.
+!
 !  SOURCE
 
-    subroutine push_char(c)
+    subroutine push_char()
 
     implicit none
 
-    character(kind=CK,len=1), intent(in) :: c
+    !all we do is decrement the stream position counter:
 
-    character(kind=CK,len=max_numeric_str_len) :: istr
-
-    if (.not. exception_thrown) then
-
-        pushed_index = pushed_index + 1
-
-        if (pushed_index>0 .and. pushed_index<=len(pushed_char)) then
-            pushed_char(pushed_index:pushed_index) = c
-        else
-            call integer_to_string(pushed_index,istr)
-            call throw_exception('Error in push_char:'//&
-                                 ' invalid valid of pushed_index: '//trim(istr))
-        end if
-
-    end if
+    ipos = ipos - 1
 
     end subroutine push_char
 !*****************************************************************************************
