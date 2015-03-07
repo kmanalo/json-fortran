@@ -115,9 +115,9 @@ contains
 
     call cpu_time(tstart)
     call read_file(dir//filename, str)
-    call cpu_time(tend)
-    write(error_unit,'(A,1X,F10.3,1X,A)') 'Elapsed time to read:  ',tend-tstart,' sec'
-    call cpu_time(tstart)
+    !call cpu_time(tend)
+    !write(error_unit,'(A,1X,F10.3,1X,A)') 'Elapsed time:  ',tend-tstart,' sec'
+    !call cpu_time(tstart)
     call f%load_from_string(str)
     call cpu_time(tend)
     write(error_unit,'(A,1X,F10.3,1X,A)') 'Elapsed time to parse: ',tend-tstart,' sec'

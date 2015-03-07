@@ -192,6 +192,9 @@
     character(kind=CK,len=*),parameter :: int_fmt  = '(I0)' !minimum width format for integers
     character(kind=CK,len=*),parameter :: star     = '*'    !for invalid numbers
 
+    !for allocatable strings:
+    integer(IK),parameter :: chunk_size = 100  !allocate chunks of this size
+
     !*********************************************************
     !****d* json_module/var_type
     !
@@ -2449,34 +2452,54 @@
     character(kind=CK,len=*),intent(in)              :: str_in
     character(kind=CK,len=:),allocatable,intent(out) :: str_out
 
-    integer(IK) :: i
+    integer(IK) :: i,ipos
     character(kind=CK,len=1) :: c
 
-    str_out = ''
+    str_out = repeat(space,chunk_size)
+    ipos = 1
 
     !go through the string and look for special characters:
     do i=1,len(str_in)
 
         c = str_in(i:i)    !get next character in the input string
 
+        !if the string is not big enough, then add another chunk:
+        if (ipos+3>len(str_out)) str_out = str_out // repeat(space, chunk_size)
+
         select case(c)
         case(quotation_mark,backslash,slash)
-            str_out = str_out//backslash//c
+            str_out(ipos:ipos+1) = backslash//c
+            ipos = ipos + 2
         case(bspace)
-            str_out = str_out//'\b'
+            str_out(ipos:ipos+1) = '\b'
+            ipos = ipos + 2
         case(formfeed)
-            str_out = str_out//'\f'
+            str_out(ipos:ipos+1) = '\f'
+            ipos = ipos + 2
         case(newline)
-            str_out = str_out//'\n'
+            str_out(ipos:ipos+1) = '\n'
+            ipos = ipos + 2
         case(carriage_return)
-            str_out = str_out//'\r'
+            str_out(ipos:ipos+1) = '\r'
+            ipos = ipos + 2
         case(horizontal_tab)
-            str_out = str_out//'\t'
+            str_out(ipos:ipos+1) = '\t'
+            ipos = ipos + 2
         case default
-            str_out = str_out//c
+            str_out(ipos:ipos) = c
+            ipos = ipos + 1
         end select
 
     end do
+
+    !trim the string if necessary:
+    if (ipos<len(str_out)+1) then
+        if (ipos==1) then
+            str_out = ''
+        else
+            str_out = str_out(1:ipos-1)
+        end if
+    end if
 
     end subroutine escape_string
 !*****************************************************************************************
@@ -5006,8 +5029,8 @@
             return
         end if
 
-       ! another possible pair
-       c = pop_char(unit, str=str, eof = eof, skip_ws = .true.)
+        ! another possible pair
+        c = pop_char(unit, str=str, eof = eof, skip_ws = .true.)
         if (eof) then
             call throw_exception('Error in parse_object: '//&
                                  'End of file encountered when parsing an object')
@@ -5119,12 +5142,18 @@
     character(kind=CK,len=4) :: hex
     integer(IK) :: i
 
+    !
+    !.....test: to speed up by reducing the number of character string reallocations...
+    !
+    integer(IK) :: ipos !index to put next character
+
     !at least return a blank string if there is a problem:
-    string = ''
+    string = repeat(space, chunk_size)
 
     if (.not. exception_thrown) then
 
         !initialize:
+        ipos = 1
         last = space
         is_hex = .false.
         escape = .false.
@@ -5140,7 +5169,7 @@
                 call throw_exception('Error in parse_string: Expecting end of string')
                 return
 
-            else if (quotation_mark == c .and. last /= backslash) then
+            else if (c==quotation_mark .and. last /= backslash) then
 
                 if (is_hex) call throw_exception('Error in parse_string:'//&
                                                  ' incomplete hex string: \u'//trim(hex))
@@ -5148,8 +5177,12 @@
 
             else
 
+                !if the string is not big enough, then add another chunk:
+                if (ipos>len(string)) string = string // repeat(space, chunk_size)
+
                 !append to string:
-                string = string//c
+                string(ipos:ipos) = c
+                ipos = ipos + 1
 
                 !hex validation:
                 if (is_hex) then  !accumulate the four characters after '\u'
@@ -5190,7 +5223,44 @@
 
     end if
 
+    !trim the string if necessary:
+    if (ipos<len(string)+1) then
+        if (ipos==1) then
+            string = ''
+        else
+            string = string(1:ipos-1)
+        end if
+    end if
+
     end subroutine parse_string
+!*****************************************************************************************
+
+!*****************************************************************************************
+!.... gfortran bug ..... some problem.....
+!*****************************************************************************************
+    pure subroutine add_character_to_string(str,ipos,c)
+
+    implicit none
+
+    character(kind=CK,len=:),allocatable,intent(inout) :: str
+    integer(IK),intent(inout) :: ipos
+    character(kind=CK,len=1),intent(in) :: c
+
+    integer :: iend
+
+    if (allocated(str)) then
+        !resize string if necessary:
+        if (ipos>len(str)) str = str // repeat(space, chunk_size)
+    else
+        str = repeat(space, chunk_size)
+        ipos = 1
+    end if
+
+    !append to string:
+    str(ipos:ipos) = c
+    ipos = ipos + 1
+
+    end subroutine add_character_to_string
 !*****************************************************************************************
 
 !*****************************************************************************************
@@ -5208,9 +5278,9 @@
 
     implicit none
 
-    integer(IK), intent(in)                :: unit
-    character(kind=CK,len=*),intent(in)    :: str
-    character(kind=CK,len = *), intent(in) :: chars
+    integer(IK), intent(in)              :: unit
+    character(kind=CK,len=*),intent(in)  :: str
+    character(kind=CK,len=*), intent(in) :: chars
 
     integer(IK) :: i, length
     logical(LK) :: eof
@@ -5272,9 +5342,15 @@
     logical(LK) :: first
     logical(LK) :: is_integer
 
+    !
+    !.....test: to speed up by reducing the number of character string reallocations...
+    !
+    integer(IK) :: ipos !index to put next character
+
     if (.not. exception_thrown) then
 
-        tmp = ''
+        tmp = repeat(space, chunk_size)
+        ipos = 1
         first = .true.
         is_integer = .true.  !assume it may be an integer, unless otherwise determined
 
@@ -5296,19 +5372,31 @@
                     if (is_integer .and. (.not. first)) is_integer = .false.
 
                     !add it to the string:
-                    tmp = tmp // c
+                    if (ipos>len(tmp)) tmp = tmp // repeat(space, chunk_size)
+                    tmp(ipos:ipos) = c
+                    ipos = ipos + 1
+
+                    !tmp = tmp // c   !...original
 
                 case('.','E','e')    !can be present in real numbers
 
                     if (is_integer) is_integer = .false.
 
                     !add it to the string:
-                    tmp = tmp // c
+                    if (ipos>len(tmp)) tmp = tmp // repeat(space, chunk_size)
+                    tmp(ipos:ipos) = c
+                    ipos = ipos + 1
+
+                    !tmp = tmp // c   !...original
 
                 case('0':'9')    !valid characters for numbers
 
                     !add it to the string:
-                    tmp = tmp // c
+                    if (ipos>len(tmp)) tmp = tmp // repeat(space, chunk_size)
+                    tmp(ipos:ipos) = c
+                    ipos = ipos + 1
+
+                    !tmp = tmp // c   !...original
 
                 case default
 
