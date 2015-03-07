@@ -145,11 +145,11 @@ contains
         write(error_unit,'(A)') 'This should have failed!'
         error_cnt = error_cnt + 1
     end if
-    call json_print(p,OUTPUT_UNIT)  ! print to console
-    if (json_failed()) then
-        call json_print_error_message(error_unit)
-        error_cnt = error_cnt + 1
-    end if
+ !  call json_print(p,OUTPUT_UNIT)  ! print to console
+ !  if (json_failed()) then
+ !      call json_print_error_message(error_unit)
+ !      error_cnt = error_cnt + 1
+ !  end if
     call json_destroy(p)            ! cleanup
     if (json_failed()) then
         call json_print_error_message(error_unit)
