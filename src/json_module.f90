@@ -2455,50 +2455,70 @@
     integer(IK) :: i,ipos
     character(kind=CK,len=1) :: c
 
-    str_out = repeat(space,chunk_size)
-    ipos = 1
+    character(kind=CK,len=*),parameter :: specials = quotation_mark//&
+                                                     backslash//&
+                                                     slash//&
+                                                     bspace//&
+                                                     formfeed//&
+                                                     newline//&
+                                                     carriage_return//&
+                                                     horizontal_tab
 
-    !go through the string and look for special characters:
-    do i=1,len(str_in)
+    !Do a quick scan for the special characters,
+    ! if any are present, then process the string,
+    ! otherwise, return the string as is.
+    if (scan(str_in,specials)>0) then
 
-        c = str_in(i:i)    !get next character in the input string
+        str_out = repeat(space,chunk_size)
+        ipos = 1
 
-        !if the string is not big enough, then add another chunk:
-        if (ipos+3>len(str_out)) str_out = str_out // repeat(space, chunk_size)
+        !go through the string and look for special characters:
+        do i=1,len(str_in)
 
-        select case(c)
-        case(quotation_mark,backslash,slash)
-            str_out(ipos:ipos+1) = backslash//c
-            ipos = ipos + 2
-        case(bspace)
-            str_out(ipos:ipos+1) = '\b'
-            ipos = ipos + 2
-        case(formfeed)
-            str_out(ipos:ipos+1) = '\f'
-            ipos = ipos + 2
-        case(newline)
-            str_out(ipos:ipos+1) = '\n'
-            ipos = ipos + 2
-        case(carriage_return)
-            str_out(ipos:ipos+1) = '\r'
-            ipos = ipos + 2
-        case(horizontal_tab)
-            str_out(ipos:ipos+1) = '\t'
-            ipos = ipos + 2
-        case default
-            str_out(ipos:ipos) = c
-            ipos = ipos + 1
-        end select
+            c = str_in(i:i)    !get next character in the input string
 
-    end do
+            !if the string is not big enough, then add another chunk:
+            if (ipos+3>len(str_out)) str_out = str_out // repeat(space, chunk_size)
 
-    !trim the string if necessary:
-    if (ipos<len(str_out)+1) then
-        if (ipos==1) then
-            str_out = ''
-        else
-            str_out = str_out(1:ipos-1)
+            select case(c)
+            case(quotation_mark,backslash,slash)
+                str_out(ipos:ipos+1) = backslash//c
+                ipos = ipos + 2
+            case(bspace)
+                str_out(ipos:ipos+1) = '\b'
+                ipos = ipos + 2
+            case(formfeed)
+                str_out(ipos:ipos+1) = '\f'
+                ipos = ipos + 2
+            case(newline)
+                str_out(ipos:ipos+1) = '\n'
+                ipos = ipos + 2
+            case(carriage_return)
+                str_out(ipos:ipos+1) = '\r'
+                ipos = ipos + 2
+            case(horizontal_tab)
+                str_out(ipos:ipos+1) = '\t'
+                ipos = ipos + 2
+            case default
+                str_out(ipos:ipos) = c
+                ipos = ipos + 1
+            end select
+
+        end do
+
+        !trim the string if necessary:
+        if (ipos<len(str_out)+1) then
+            if (ipos==1) then
+                str_out = ''
+            else
+                str_out = str_out(1:ipos-1)
+            end if
         end if
+
+    else
+
+        str_out = str_in
+
     end if
 
     end subroutine escape_string
@@ -2779,6 +2799,7 @@
     end if
 
     end subroutine json_print_1
+!*****************************************************************************************
 
 !*****************************************************************************************
 !****f* json_module/json_print_2
@@ -2816,6 +2837,7 @@
     end if
 
     end subroutine json_print_2
+!*****************************************************************************************
 
 !*****************************************************************************************
 !****if* json_module/json_value_print
@@ -4141,6 +4163,7 @@
     character(kind=CK,len=:),allocatable :: line, arrow_str
     character(kind=CK,len=10) :: line_str, char_str
     logical(LK) :: is_open
+    character(kind=CK,len=20) :: access_str,form_str
 
     !clear any exceptions and initialize:
     call json_initialize()
@@ -4156,7 +4179,7 @@
 
         !check to see if the file is already open
         ! if it is, then use it, otherwise open the file with the name given.
-        !   [NOTE: the file must be opened using UNFORMATTED and STREAM...  can this be checked?
+        !   [NOTE: the file must be opened using UNFORMATTED and STREAM]
         inquire(unit=iunit, opened=is_open, iostat=istat)
         if (istat==0 .and. .not. is_open) then
            ! open the file
@@ -4167,6 +4190,15 @@
                     access      = 'STREAM', &      !
                     form        = 'UNFORMATTED', & !
                     iostat      = istat)
+        else
+            inquire(unit=iunit,access=access_str)
+            inquire(unit=iunit,form=form_str)
+            if (access_str/='STREAM' .or. form_str/='UNFORMATTED') then
+                call throw_exception('Error in json_parse: '//&
+                                     'File must be opened with '//&
+                                     'access=STREAM and form=UNFORMATTED.')
+                return
+            end if
         end if
 
     else if (.not. present(unit) .and. present(file) .and. .not. present(str)) then
@@ -4296,42 +4328,13 @@
     integer(IK),intent(in)                           :: iunit
     character(kind=CK,len=:),allocatable,intent(out) :: line
 
-!
-! ... original:
-!
-
-!    integer(IK),parameter              :: n_chunk = 256   ! chunk size [arbitrary]
-!    character(kind=CK,len=*),parameter :: nfmt = '(A256)' ! corresponding format statement
-!
-!    character(kind=CK,len=n_chunk) :: chunk
-!    integer(IK) :: istat,isize
-!
-!    !initialize:
-!    line = ''
-!
-!    !rewind to beginning of the current record:
-!    backspace(iunit, iostat=istat)
-!
-!    !loop to read in all the characters in the current record.
-!    ![the line is read in chunks until the end of the line is reached]
-!    if (istat==0) then
-!        do
-!            read(iunit,fmt=nfmt,advance='NO',size=isize,iostat=istat) chunk
-!            if (istat==0) then
-!                line = line//chunk
-!            else
-!                if (isize>0) line = line//chunk(1:isize)
-!                exit
-!            end if
-!        end do
-!    end if
-
-!
-!....update for the new STREAM version.....       
-!   !!! !!!! not quite right for EXAMPLE 6 case 2 .....  DOUBLE CHECK THIS...
-
-    integer(IK) :: istart,iend,ios
+    integer,parameter :: n_chunk = 100
+    character(kind=CK,len=n_chunk) :: chunk
+    integer(IK) :: istat,isize,istart,iend,ios
     character(kind=CK,len=1) :: c
+
+    !....update for the new STREAM version.....       
+    !   !!! !!!! not quite right for EXAMPLE 6 case 2 .....  DOUBLE CHECK THIS...
 
     istart = ipos
     do 
@@ -4354,6 +4357,26 @@
     end do
     allocate( character(len=iend-istart+1) :: line )
     read(iunit,pos=istart,iostat=ios) line   
+
+  !      !initialize:
+  !      line = ''
+  !
+  !      !rewind to beginning of the current record:
+  !      backspace(iunit, iostat=istat)
+  !
+  !      !loop to read in all the characters in the current record.
+  !      ![the line is read in chunks until the end of the line is reached]
+  !      if (istat==0) then
+  !          do
+  !              read(iunit,fmt='(A)',advance='NO',size=isize,iostat=istat) chunk
+  !              if (istat==0) then
+  !                  line = line//chunk
+  !              else
+  !                  if (isize>0) line = line//chunk(1:isize)
+  !                  exit
+  !              end if
+  !          end do
+  !      end if
 
     end subroutine get_current_line_from_file
 !*****************************************************************************************
@@ -5475,8 +5498,14 @@
             if (unit/=0) then    !read from the file
 
                 !read the next character:
+
+                !read(unit=unit,fmt='(A1)',advance='NO',iostat=ios) c
+
                 read(unit=unit,pos=ipos,iostat=ios) c
                 ipos = ipos + 1
+
+                !....note: let's try read the file in chunks...
+                !.... or use asynchronous read with double buffering (see Modern Fortran: Style and Usage)
 
             else    !read from the string
 
