@@ -4358,26 +4358,26 @@
     allocate( character(len=iend-istart+1) :: line )
     read(iunit,pos=istart,iostat=ios) line   
 
-  !      !initialize:
-  !      line = ''
-  !
-  !      !rewind to beginning of the current record:
-  !      backspace(iunit, iostat=istat)
-  !
-  !      !loop to read in all the characters in the current record.
-  !      ![the line is read in chunks until the end of the line is reached]
-  !      if (istat==0) then
-  !          do
-  !              isize=0
-  !              read(iunit,fmt=nfmt,advance='NO',size=isize,iostat=istat) chunk
-  !              if (istat==0) then
-  !                  line = line//chunk
-  !              else
-  !                  if (isize>0 .and. isize<=n_chunk) line = line//chunk(1:isize)
-  !                  exit
-  !              end if
-  !          end do
-  !      end if
+    ! !initialize:
+    ! line = ''
+    ! 
+    ! !rewind to beginning of the current record:
+    ! backspace(iunit, iostat=istat)
+    ! 
+    ! !loop to read in all the characters in the current record.
+    ! ![the line is read in chunks until the end of the line is reached]
+    ! if (istat==0) then
+    !     do
+    !         isize=0
+    !         read(iunit,fmt=nfmt,advance='NO',size=isize,iostat=istat) chunk
+    !         if (istat==0) then
+    !             line = line//chunk
+    !         else
+    !             if (isize>0 .and. isize<=n_chunk) line = line//chunk(1:isize)
+    !             exit
+    !         end if
+    !     end do
+    ! end if
 
     end subroutine get_current_line_from_file
 !*****************************************************************************************
